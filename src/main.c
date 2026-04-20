@@ -5,7 +5,7 @@
 
 #define VERSION "1.0.0"
 
-void help_msg()
+static void help_msg(void)
 {
     printf("Rose Rank\t Option Pricing\nGuide:\n");
     printf("--------------------\n");
@@ -15,13 +15,15 @@ void help_msg()
            "\t Example Usage: \"-set (43, 40, 0.015, 0.004, 0, ./data.csv)\"\n");
     printf("-contract <call|put>\t Possible contracts (default: call).\n");
     printf("-type <american|european>\t Version of option to use (default: european).\n");
+    printf("-export <csv>\t Saves screener output to a CSV file.\n");
     printf("-model <BlackScholes|Binomial|MonteCarlo>\t"
            "Model to use, currently supporting BlackScholes, Binomial, & MonteCarlo.\n");
+    printf("\t You can parameterize models as Binomial(200) or MonteCarlo(100000).\n");
     printf("-greeks\t Prints the standard option metrics.\n");
     printf("-help\t Prints the usage.\n");
     printf("-screener <file>\t Parses and outputs information on several stocks at once. Gives recommended structure.\n"
            "Example output:\n"
-           "$ ./option_pricer -screener stocks_to_watch.csv\n"
+           "$ ./option_pricer -screener data/stocks_to_watch.csv -export roserank.csv\n"
            "\n"
            "Ticker   | Rank   | IVP   | Yield    | LEAP Eff.    | Recommended Structure\n"
            "-------------------------------------------------------------------------------------\n"
@@ -29,13 +31,13 @@ void help_msg()
            "AAPL     | 0.88   | 0.19  | 0.16     | 28.29        | Deep ITM LEAP (High Efficiency)\n"
            "TSLA     | 0.45   | 0.66  | 1.02     | 6.80         | Neutral / Wait for Entry\n"
            "KO       | 0.55   | 0.13  | 0.06     | 37.32        | Neutral / Wait for Entry\n"
-           "GME      | 0.20   | 2.16  | 20.82    | 3.27         | Bear Call Spread    \n"
-           "MSFT     | 0.75   | 0.21  | 0.28     | 22.96        | Neutral / Wait for Entry)\n");
+           "GME      | 0.20   | 2.16  | 20.82    | 3.27         | Bear Call Spread\n"
+           "MSFT     | 0.75   | 0.21  | 0.28     | 22.96        | Neutral / Wait for Entry\n");
     printf("-version\t Prints this version.\n\n");
     printf("--------------------\n");
 }
 
-void screener(const char *ticker_list_file)
+static void screener(const char *ticker_list_file, const char *export_file)
 {
     FILE *file = fopen(ticker_list_file, "r");
     if (!file)
@@ -44,9 +46,29 @@ void screener(const char *ticker_list_file)
         return;
     }
 
+    FILE *csv = NULL;
+    if (export_file[0] != '\0')
+    {
+        csv = fopen(export_file, "w");
+        if (!csv)
+        {
+            fprintf(stderr, "Error: Could not open export file %s\n", export_file);
+            fclose(file);
+            return;
+        }
+
+        fprintf(csv, "ticker,rank,ivp,yield,leap_eff,recommendation\n");
+    }
+
     char line[1024];
-    // Skip header line
-    fgets(line, sizeof(line), file);
+    if (!fgets(line, sizeof(line), file))
+    {
+        fprintf(stderr, "Error: Screener file %s is empty\n", ticker_list_file);
+        fclose(file);
+        if (csv)
+            fclose(csv);
+        return;
+    }
 
     printf("\n%-8s | %-6s | %-5s | %-8s | %-12s | %-20s\n",
            "Ticker", "Rank", "IVP", "Yield", "LEAP Eff.", "Recommended Structure");
@@ -56,48 +78,63 @@ void screener(const char *ticker_list_file)
     {
         char ticker[16];
         float rank, price, call_p, put_p, strike, expiry;
-        if (sscanf(line, "%[^,],%f,%f,%f,%f,%f,%f",
+        if (sscanf(line, "%15[^,],%f,%f,%f,%f,%f,%f",
                    ticker, &rank, &price, &call_p, &put_p, &strike, &expiry) == 7)
         {
             Candidate c;
             c.stock_rank = rank;
 
-            IVResult res = get_implied_vol(price, strike, expiry, 0.05, call_p);
-
-            // Use sigma directly as a placeholder for IVP until you implement historical arrays
+            IVResult res = get_implied_vol(price, strike, expiry, 0.05f, call_p);
             c.iv_percentile = res.converged ? res.sigma : 0.0f;
             c.call_yield = calculate_cc_yield(price, call_p, expiry);
 
-            Greeks g = get_greeks(price, strike, expiry, 0.05, res.sigma, 0);
+            Greeks g = get_greeks(price, strike, expiry, 0.05f, res.sigma, 0);
             c.leap_efficiency = calculate_leap_efficiency(price, call_p, g.delta);
 
-            IVResult iv_put = get_implied_vol(price, strike, expiry, 0.05, put_p);
+            IVResult iv_put = get_implied_vol(price, strike, expiry, 0.05f, put_p);
             float skew = iv_put.sigma - res.sigma;
 
             const char *structure = determine_best_structure(c, skew);
             printf("%-8s | %-6.2f | %-5.2f | %-8.2f | %-12.2f | %-20s\n",
                    ticker, c.stock_rank, c.iv_percentile, c.call_yield, c.leap_efficiency, structure);
+
+            if (csv)
+            {
+                fprintf(csv, "%s,%.2f,%.2f,%.2f,%.2f,%s\n",
+                        ticker,
+                        c.stock_rank,
+                        c.iv_percentile,
+                        c.call_yield,
+                        c.leap_efficiency,
+                        structure);
+            }
         }
     }
 
     fclose(file);
+    if (csv)
+    {
+        fclose(csv);
+        printf("\nExported screener results to %s\n", export_file);
+    }
 }
 
-void handle_msgs(int argc, char *argv[])
+static void handle_msgs(int argc, char *argv[])
 {
-    float current = 0.0, strike = 0.0, expiry_years = 0.0;
-    float rf_rate = 0.0, sigma = 0.0;
+    float current = 0.0f, strike = 0.0f, expiry_years = 0.0f;
+    float rf_rate = 0.0f, sigma = 0.0f;
     char history[256] = {0};
+    char export_file[256] = {0};
 
     int steps = 100;
-    int sims = 1000;
+    int sims = 10000;
 
     int have_set = 0;
     int model_selected = 0;
     int want_greeks = 0;
     int american = 0;
     char model[64] = "BlackScholes";
-    int is_put = 0; // Put flag
+    int is_put = 0;
 
     for (int i = 1; i < argc; i++)
     {
@@ -108,7 +145,7 @@ void handle_msgs(int argc, char *argv[])
         }
         else if (strcmp(argv[i], "-version") == 0)
         {
-            printf("Option Price %s by https://Ra4ster.github.io", VERSION);
+            printf("Option Price %s by https://Ra4ster.github.io\n", VERSION);
             return;
         }
         else if (strcmp(argv[i], "-screener") == 0)
@@ -118,7 +155,7 @@ void handle_msgs(int argc, char *argv[])
                 fprintf(stderr, "Error: -screener requires a filename\n");
                 return;
             }
-            screener(argv[++i]);
+            screener(argv[++i], export_file);
             return;
         }
         else if (strcmp(argv[i], "-greeks") == 0)
@@ -135,7 +172,7 @@ void handle_msgs(int argc, char *argv[])
             i++;
             int found_put = 0;
             if ((found_put = strcmp(argv[i], "put") == 0) || strcmp(argv[i], "call") == 0)
-            { // Handle invalid contracts
+            {
                 is_put = found_put;
             }
             else
@@ -143,6 +180,17 @@ void handle_msgs(int argc, char *argv[])
                 fprintf(stderr, "Error: invalid contract '%s' (expected call or put)\n", argv[i]);
                 return;
             }
+        }
+        else if (strcmp(argv[i], "-export") == 0)
+        {
+            if (i + 1 >= argc)
+            {
+                fprintf(stderr, "Error: -export requires csv file\n");
+                return;
+            }
+            i++;
+            strncpy(export_file, argv[i], sizeof(export_file) - 1);
+            export_file[sizeof(export_file) - 1] = '\0';
         }
         else if (strcmp(argv[i], "-type") == 0)
         {
@@ -158,7 +206,7 @@ void handle_msgs(int argc, char *argv[])
             }
             else if (strcmp(argv[i], "european") == 0)
             {
-                american = 0; // Must use elif to handle error
+                american = 0;
             }
             else
             {
@@ -176,7 +224,7 @@ void handle_msgs(int argc, char *argv[])
                 return;
             }
             i++;
-            if (strncmp(argv[i], "BlackScholes", 12) == 0)
+            if (strcmp(argv[i], "BlackScholes") == 0)
             {
                 strncpy(model, "BlackScholes", sizeof(model) - 1);
                 model[sizeof(model) - 1] = '\0';
@@ -184,35 +232,43 @@ void handle_msgs(int argc, char *argv[])
             else if (strncmp(argv[i], "Binomial", 8) == 0)
             {
                 int readsteps = 0;
+                strncpy(model, "Binomial", sizeof(model) - 1);
+                model[sizeof(model) - 1] = '\0';
 
-                if (sscanf(argv[i], "Binomial(%d)", &readsteps) == 1 && readsteps > 0)
+                if (sscanf(argv[i], "Binomial(%d)", &readsteps) == 1)
                 {
-                    strncpy(model, "Binomial", sizeof(model) - 1);
-                    model[sizeof(model) - 1] = '\0';
+                    if (readsteps <= 0)
+                    {
+                        fprintf(stderr, "Error: Binomial steps must be > 0\n");
+                        return;
+                    }
                     steps = readsteps;
                 }
-                else if (strcmp(argv[i], "Binomial") == 0)
+                else if (strcmp(argv[i], "Binomial") != 0)
                 {
-                    strncpy(model, "Binomial", sizeof(model) - 1);
-                    model[sizeof(model) - 1] = '\0';
-                    steps = 100; // default
+                    fprintf(stderr, "Error: invalid model '%s'\n", argv[i]);
+                    return;
                 }
             }
             else if (strncmp(argv[i], "MonteCarlo", 10) == 0)
             {
                 int readsims = 0;
+                strncpy(model, "MonteCarlo", sizeof(model) - 1);
+                model[sizeof(model) - 1] = '\0';
 
-                if (sscanf(argv[i], "MonteCarlo(%d)", &readsims) == 1 && sims > 0)
+                if (sscanf(argv[i], "MonteCarlo(%d)", &readsims) == 1)
                 {
-                    strncpy(model, "MonteCarlo", sizeof(model) - 1);
-                    model[sizeof(model) - 1] = '\0';
+                    if (readsims <= 0)
+                    {
+                        fprintf(stderr, "Error: MonteCarlo simulations must be > 0\n");
+                        return;
+                    }
                     sims = readsims;
                 }
-                else if (strcmp(argv[i], "MonteCarlo") == 0)
+                else if (strcmp(argv[i], "MonteCarlo") != 0)
                 {
-                    strncpy(model, "MonteCarlo", sizeof(model) - 1);
-                    model[sizeof(model) - 1] = '\0';
-                    sims = 10000; // default
+                    fprintf(stderr, "Error: invalid model '%s'\n", argv[i]);
+                    return;
                 }
             }
             else
@@ -282,7 +338,7 @@ void handle_msgs(int argc, char *argv[])
         help_msg();
         return;
     }
-    if (sigma == 0.0 && history[0] != '\0')
+    if (sigma == 0.0f && history[0] != '\0')
     {
         fprintf(stderr, "Note: sigma is 0 and history file '%s' was provided but no volatility-calculation\n"
                         "   function was provided to compute sigma from history. Using sigma = 0.\n",
@@ -303,7 +359,6 @@ void handle_msgs(int argc, char *argv[])
 
         if (model_selected)
         {
-            // User picked one specific model
             if (strcmp(model, "BlackScholes") == 0)
             {
                 results[0] = price(option, "BlackScholes", american);
@@ -316,7 +371,6 @@ void handle_msgs(int argc, char *argv[])
         }
         else
         {
-            // No model specified: Run the "Grand Slam" comparison
             results[0] = price(option, "BlackScholes", american);
             results[1] = price_advanced(option, "Binomial", american, steps, sims);
             results[2] = price_advanced(option, "MonteCarlo", american, steps, sims);
