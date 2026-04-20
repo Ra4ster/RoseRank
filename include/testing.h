@@ -29,10 +29,7 @@ static inline double test_timing(void *fn, void *args)
     return stopwatch(start, end);
 }
 
-static float rand_percent(void)
-{
-    return ((float)rand() + 1.0f) / ((float)RAND_MAX + 2.0f);
-}
+float rand_percent(void);
 
 static inline void rand_fill(float *x, int n)
 {

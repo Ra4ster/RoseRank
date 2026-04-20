@@ -1,12 +1,12 @@
 #include "black_scholes.h"
 #include "pricing.h"
 
-inline float d1_(float S_0, float K, float r, float sigma, float T)
+static inline float d1_(float S_0, float K, float r, float sigma, float T)
 {
     return (log(S_0 / K) + (r + (sigma * sigma / 2.0f)) * T) / (sigma * sqrt(T));
 }
 
-inline float d2_(float d1, float sigma, float T)
+static inline float d2_(float d1, float sigma, float T)
 {
     return d1 - sigma * sqrt(T);
 }

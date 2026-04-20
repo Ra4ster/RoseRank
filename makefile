@@ -1,5 +1,9 @@
-CFILES = volatility.c black_scholes.c binom.c monte_carlo.c pricing.c benchmark.c best_stock.c main.c
-CFLAGS = -mfma -mavx -mavx2 -O3 -Wall -Wextra -Wno-unused-function -o
+CC = gcc
+SRC = $(wildcard src/*.c)
+OUT = bin/option_pricer
 
-option_pricer: $(CFILES)
-	gcc $(CFILES) $(CFLAGS) option_pricer
+debug:
+	$(CC) $(SRC) -Iinclude -std=c11 -Wall -Wextra -Wshadow -g -O0 -mavx -mavx2 -mfma -o $(OUT)
+
+release:
+	$(CC) $(SRC) -Iinclude -std=c11 -Wall -Wextra -Wshadow -O3 -mavx -mavx2 -mfma -o $(OUT)
