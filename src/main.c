@@ -7,7 +7,7 @@
 
 void help_msg()
 {
-    printf("Option Pricer\nGuide:\n");
+    printf("Rose Rank\t Option Pricing\nGuide:\n");
     printf("--------------------\n");
     printf("-set (S, K, T, r, v, H)\t Uses the following values:\n");
     printf("\t 1. S: Current Price\n\t 2. K: Strike Price\n\t 3. T: Years until Expiration"
@@ -88,6 +88,9 @@ void handle_msgs(int argc, char *argv[])
     float current = 0.0, strike = 0.0, expiry_years = 0.0;
     float rf_rate = 0.0, sigma = 0.0;
     char history[256] = {0};
+
+    int steps = 100;
+    int sims = 1000;
 
     int have_set = 0;
     int model_selected = 0;
@@ -173,12 +176,44 @@ void handle_msgs(int argc, char *argv[])
                 return;
             }
             i++;
-            if (strcmp(argv[i], "BlackScholes") == 0 ||
-                strcmp(argv[i], "Binomial") == 0 ||
-                strcmp(argv[i], "MonteCarlo") == 0)
+            if (strncmp(argv[i], "BlackScholes", 12) == 0)
             {
-                strncpy(model, argv[i], sizeof(model) - 1);
+                strncpy(model, "BlackScholes", sizeof(model) - 1);
                 model[sizeof(model) - 1] = '\0';
+            }
+            else if (strncmp(argv[i], "Binomial", 8) == 0)
+            {
+                int readsteps = 0;
+
+                if (sscanf(argv[i], "Binomial(%d)", &readsteps) == 1 && readsteps > 0)
+                {
+                    strncpy(model, "Binomial", sizeof(model) - 1);
+                    model[sizeof(model) - 1] = '\0';
+                    steps = readsteps;
+                }
+                else if (strcmp(argv[i], "Binomial") == 0)
+                {
+                    strncpy(model, "Binomial", sizeof(model) - 1);
+                    model[sizeof(model) - 1] = '\0';
+                    steps = 100; // default
+                }
+            }
+            else if (strncmp(argv[i], "MonteCarlo", 10) == 0)
+            {
+                int readsims = 0;
+
+                if (sscanf(argv[i], "MonteCarlo(%d)", &readsims) == 1 && sims > 0)
+                {
+                    strncpy(model, "MonteCarlo", sizeof(model) - 1);
+                    model[sizeof(model) - 1] = '\0';
+                    sims = readsims;
+                }
+                else if (strcmp(argv[i], "MonteCarlo") == 0)
+                {
+                    strncpy(model, "MonteCarlo", sizeof(model) - 1);
+                    model[sizeof(model) - 1] = '\0';
+                    sims = 10000; // default
+                }
             }
             else
             {
@@ -275,7 +310,7 @@ void handle_msgs(int argc, char *argv[])
             }
             else
             {
-                results[0] = price_advanced(option, model, american, 100, 10000);
+                results[0] = price_advanced(option, model, american, steps, sims);
             }
             num_results = 1;
         }
@@ -283,8 +318,8 @@ void handle_msgs(int argc, char *argv[])
         {
             // No model specified: Run the "Grand Slam" comparison
             results[0] = price(option, "BlackScholes", american);
-            results[1] = price_advanced(option, "Binomial", american, 100, 0);
-            results[2] = price_advanced(option, "MonteCarlo", american, 0, 10000);
+            results[1] = price_advanced(option, "Binomial", american, steps, sims);
+            results[2] = price_advanced(option, "MonteCarlo", american, steps, sims);
             num_results = 3;
         }
 
